@@ -1,7 +1,8 @@
-import time
 from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field
+
+from modules.utils import get_timestamp
 
 
 class UserBase(BaseModel):
@@ -9,8 +10,8 @@ class UserBase(BaseModel):
     full_name: str = Field(..., min_length=3, max_length=50)
     email: EmailStr = Field(..., min_length=3, max_length=50)
     is_active: bool = True
-    created_at: float = Field(default_factory=lambda: time.time())
-    updated_at: float = Field(default_factory=lambda: time.time())
+    created_at: float = Field(default_factory=lambda: get_timestamp())
+    updated_at: float = Field(default_factory=lambda: get_timestamp())
 
 class CreateUser(BaseModel):
     pass
@@ -23,7 +24,7 @@ class UpdateUser(BaseModel):
     email: Optional[EmailStr] = None
     password: Optional[str] = Field(None, min_length=8, max_length=50)
     is_active: Optional[bool] = None
-    updated_at: float = Field(default_factory=lambda: time.time())
+    updated_at: float = Field(default_factory=lambda: get_timestamp())
 
 class DeleteUser(BaseModel):
     id: str
