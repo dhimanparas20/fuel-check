@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+from rich import print
 
 # Normalize vehicle registration number
 def normalise_registration_number(registration_number: str) -> str:

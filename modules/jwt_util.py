@@ -4,20 +4,22 @@ from datetime import datetime, UTC, timedelta
 import jwt
 from dotenv import load_dotenv
 from fastapi import HTTPException, Header, Request
-
+from entity import user_db
 from modules.logger import get_logger
 
 load_dotenv()
 logger = get_logger("SERVER_UTILS")
-SECRET = os.getenv("JWT_SECRET", "supersecret")
+SECRET = os.getenv("JWT_SECRET", "superse345cret67")
 
 
 # Utility functions for JWT token creation and validation
 def create_jwt_token(user: dict) -> str:
     """Create a JWT token for a user."""
     payload = {
+        "id": user.get("id"),
         "name": user.get("full_name"),
         "email": user.get("email"),
+        "jwt_token_string": user.get("jwt_token_string"),
         "exp": datetime.now(UTC) + timedelta(days=7),
     }
     return jwt.encode(payload, SECRET, algorithm="HS256")
@@ -37,9 +39,17 @@ def decode_jwt_token(token: str) -> dict:
 
 
 def get_user_from_token(token: str) -> dict:
-    """Extract user info from JWT token."""
+    """Extract user info from JWT token and ensure token is still valid (not superseded)."""
     payload = decode_jwt_token(token)
-    return {"name": payload.get("name"), "email": payload.get("email")}
+    user = user_db.get_by_id(id=payload["id"])
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token.")
+    elif not user.get("is_active"):
+        raise HTTPException(status_code=401, detail="User account not active.")
+    # Check if the jwt_token_string in the token matches the one in the database
+    if user.get("jwt_token_string") != payload.get("jwt_token_string"):
+        raise HTTPException(status_code=401, detail="Token has been invalidated. Please login again.")
+    return user
 
 
 def get_token_from_header(authorization: str = Header(...)) -> str:
@@ -50,7 +60,7 @@ def get_token_from_header(authorization: str = Header(...)) -> str:
 
 
 # FastAPI dependency to require and validate JWT token
-def require_token(authorization: str = Header(None, description="JWT token in 'Authorization' header")):
+def require_token(authorization: str = Header(None, description="JWT token in 'Authorization' header")) -> dict:
     """FastAPI dependency to require and validate JWT token from Authorization header."""
     if not authorization or not authorization.startswith("Bearer "):
         logger.error("Authorization header with Bearer token required")

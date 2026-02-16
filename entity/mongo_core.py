@@ -12,16 +12,16 @@ Install:
     pip install pymongo passlib
     uv add pymongo passlib
 """
-
 import logging
+import os
 import random
 import string
 import time
 from contextlib import contextmanager
 from functools import wraps
 from typing import Any, Dict, List, Optional, Union, Tuple, Generator
-
 from uuid import uuid4
+
 from bson import ObjectId
 from bson.errors import InvalidId
 from passlib.hash import pbkdf2_sha256
@@ -39,7 +39,7 @@ from pymongo.errors import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONNECTION_STRING = "mongodb://mongoman:mongopassword@localhost:27017/"
+DEFAULT_CONNECTION_STRING = os.getenv("LOCAL_MONGO_CONNECTION_STRING")
 DEFAULT_TIMEOUT_MS = 5000
 DEFAULT_MAX_POOL_SIZE = 100
 DEFAULT_MIN_POOL_SIZE = 10
@@ -257,7 +257,7 @@ class MongoDB:
                 raise ValueError(f"Invalid ObjectId: {filter_dict['_id']}") from e
         return filter_dict
 
-    def switch_db_collection(self, db_name: str, collection_name: str) -> None:
+    def switch_db_and_collection(self, db_name: str, collection_name: str) -> None:
         """
         Switch to a different database and collection.
 
@@ -522,7 +522,9 @@ class MongoDB:
             result = []
             for item in cursor:
                 if show_id and "_id" in item:
-                    item["_id"] = str(item["_id"])
+                    item = self._replace_id_key(item)
+                elif not show_id and "_id" in item:
+                    item.pop("_id", None)
                 result.append(item)
 
             logger.debug(f"Filter returned {len(result)} documents")
@@ -569,6 +571,7 @@ class MongoDB:
                 sort=sort,
                 limit=page_size,
                 skip=skip,
+                show_id=True,
                 **kwargs
             )
 
@@ -587,7 +590,7 @@ class MongoDB:
     def get(
             self,
             filter: Optional[Dict[str, Any]] = None,
-            show_id: bool = False,
+            show_id: bool = True,
             projection: Optional[Dict[str, Any]] = None,
             session: Optional[ClientSession] = None,
             **kwargs
@@ -620,9 +623,11 @@ class MongoDB:
             )
 
             if doc and show_id and "_id" in doc:
-                doc["_id"] = str(doc["_id"])
+                doc = self._replace_id_key(doc)
+            elif doc and not show_id:
+                doc.pop("_id", None)
 
-            return doc
+            return doc if doc else {}
         except Exception as e:
             logger.error(f"Error in get: {e}")
             raise
@@ -654,7 +659,7 @@ class MongoDB:
             doc = self.collection.find_one({"_id": _id}, session=session)
 
             if doc and show_id:
-                doc["_id"] = str(doc["_id"])
+                doc = self._replace_id_key(doc)
             elif doc and not show_id:
                 doc.pop("_id", None)
 
@@ -827,15 +832,13 @@ class MongoDB:
             if result.upserted_id is not None:
                 # Document was created
                 doc = self.collection.find_one({"_id": result.upserted_id}, session=session)
-                if doc:
-                    doc["_id"] = str(doc["_id"])
+                doc = self._replace_id_key(doc)
                 logger.debug(f"Created document with ID: {result.upserted_id}")
                 return doc, True
             else:
                 # Document was updated
                 doc = self.collection.find_one(filter, session=session)
-                if doc:
-                    doc["_id"] = str(doc["_id"])
+                doc = self._replace_id_key(doc)
                 logger.debug("Updated existing document")
                 return doc, False
         except Exception as e:
@@ -863,7 +866,7 @@ class MongoDB:
             doc = self.collection.find_one(filter, session=session)
 
             if doc:
-                doc["_id"] = str(doc["_id"])
+                doc = self._replace_id_key(doc)
                 logger.debug("Document found")
                 return doc, False
 
@@ -874,8 +877,9 @@ class MongoDB:
 
             inserted_id = self.collection.insert_one(new_doc, session=session).inserted_id
             new_doc["_id"] = str(inserted_id)
+            doc = self._replace_id_key(new_doc)
             logger.debug(f"Created document with ID: {inserted_id}")
-            return new_doc, True
+            return doc, True
         except Exception as e:
             logger.error(f"Error in get_or_create: {e}")
             raise
@@ -1007,13 +1011,23 @@ class MongoDB:
                 return []
 
             keys = list(doc.keys())
-            if exclude_id and '_id' in keys:
-                keys.remove('_id')
+            if exclude_id and 'id' in keys:
+                keys.remove('id')
 
             return keys
         except Exception as e:
             logger.error(f"Error getting keys: {e}")
             raise
+
+    def _replace_id_key(self, doc: dict) -> dict:
+        """
+        Replace '_id' key with 'id' in a document.
+        """
+        if doc is None:
+            return doc
+        if '_id' in doc:
+            doc['id'] = str(doc.pop('_id'))
+        return doc
 
     # ========== INDEX MANAGEMENT ==========
 
@@ -1658,3 +1672,4 @@ if __name__ == "__main__":
         print(f"Collection has {collection_stats['count']} documents")
 
         db.delete({"name": "John Doe"})
+
